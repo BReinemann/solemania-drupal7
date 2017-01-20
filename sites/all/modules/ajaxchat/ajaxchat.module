@@ -1,0 +1,374 @@
+<?php
+
+/**
+ * Implements hook_theme().
+ */
+function ajaxchat_theme() {
+  return array(
+    'ajaxchat' => array(
+      'template' => 'ajaxchat',
+      'variables' => array('channels' => NULL, 'parents' => NULL, 'tid' => NULL),
+    ),
+    'ajaxchat_channel_list' => array(
+      'template' => 'ajaxchat-channel-list',
+      'variables' => array('channels' => NULL, 'parents' => NULL, 'tid' => NULL),
+    ),
+  );
+}
+
+/**
+ * Implements hook_menu().
+ */
+function ajaxchat_menu() {
+  $items['chat'] = array(
+      'page callback' => 'ajaxchat_router',
+      // Chatrooms permissions are taken care of by AJAX Chat.
+      'access callback' => TRUE,
+  );
+  $items['chatlist'] = array(
+    'title' => 'Chat channels',
+    'page callback' => 'ajaxchat_page',
+    'access arguments' => array('access content'),
+    'file' => 'ajaxchat.pages.inc',
+  );
+  $items['admin/structure/chat'] = array(
+    'title' => 'Chat channels',
+    'description' => 'Control AJAX chat settings.',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('ajaxchat_overview'),
+    'access arguments' => array('administer chat'),
+    'file' => 'ajaxchat.admin.inc',
+  );
+  $items['admin/structure/chat/list'] = array(
+    'title' => 'List',
+    'type' => MENU_DEFAULT_LOCAL_TASK,
+    'weight' => -10,
+  );
+  $items['admin/structure/chat/add/container'] = array(
+    'title' => 'Add container',
+    'page callback' => 'ajaxchat_form_main',
+    'page arguments' => array('container'),
+    'access arguments' => array('administer chat'),
+    'type' => MENU_LOCAL_ACTION,
+    'parent' => 'admin/structure/chat',
+    'file' => 'ajaxchat.admin.inc',
+  );
+  $items['admin/structure/chat/add/channel'] = array(
+    'title' => 'Add chat channel',
+    'page callback' => 'ajaxchat_form_main',
+    'page arguments' => array('channel'),
+    'access arguments' => array('administer chat'),
+    'type' => MENU_LOCAL_ACTION,
+    'parent' => 'admin/structure/chat',
+    'file' => 'ajaxchat.admin.inc',
+  );
+  $items['admin/structure/chat/settings'] = array(
+    'title' => 'Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('ajaxchat_admin_settings'),
+    'access arguments' => array('administer chat'),
+    'weight' => 5,
+    'type' => MENU_LOCAL_TASK,
+    'parent' => 'admin/structure/chat',
+    'file' => 'ajaxchat.admin.inc',
+  );
+  $items['admin/structure/chat/edit/container/%taxonomy_term'] = array(
+    'title' => 'Edit container',
+    'page callback' => 'ajaxchat_form_main',
+    'page arguments' => array('container', 5),
+    'access arguments' => array('administer chat'),
+    'file' => 'ajaxchat.admin.inc',
+  );
+  $items['admin/structure/chat/edit/channel/%taxonomy_term'] = array(
+    'title' => 'Edit channel',
+    'page callback' => 'ajaxchat_form_main',
+    'page arguments' => array('channel', 5),
+    'access arguments' => array('administer chat'),
+    'file' => 'ajaxchat.admin.inc',
+  );
+  $items['admin/config/chat'] = array(
+    'title' => 'Ajax Chat Settings',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('ajaxchat_admin_settings'),
+    'access arguments' => array('administer chat'),
+    'weight' => 5,
+    'type' => MENU_NORMAL_ITEM,
+    'file' => 'ajaxchat.admin.inc',
+  );
+  return $items;
+}
+
+function ajaxchat_router() {
+
+  define('AJAX_CHAT_PATH', drupal_get_path('module', 'ajaxchat') . '/chat/');
+
+  // Include custom libraries and initialization code:
+  require(AJAX_CHAT_PATH.'lib/custom.php');
+
+  // Include Class libraries:
+  require(AJAX_CHAT_PATH.'lib/classes.php');
+
+  // Initialize the chat:
+  $ajaxChat = new CustomAJAXChat();
+
+}
+
+/**
+ * Implements hook_entity_info_alter().
+ */
+function ajaxchat_entity_info_alter(&$info) {
+  // Take over URI construction for taxonomy terms that are channels.
+  if ($vid = variable_get('ajaxchat_vocabulary', 0)) {
+    // Within hook_entity_info(), we can't invoke entity_load() as that would
+    // cause infinite recursion, so we call taxonomy_vocabulary_get_names()
+    // instead of taxonomy_vocabulary_load(). All we need is the machine name
+    // of $vid, so retrieving and iterating all the vocabulary names is somewhat
+    // inefficient, but entity info is cached across page requests, and an
+    // iteration of all vocabularies once per cache clearing isn't a big deal,
+    // and is done as part of taxonomy_entity_info() anyway.
+    foreach (taxonomy_vocabulary_get_names() as $machine_name => $vocabulary) {
+      if ($vid == $vocabulary->vid) {
+        $info['taxonomy_term']['bundles'][$machine_name]['uri callback'] = 'ajaxchat_uri';
+      }
+    }
+  }
+}
+
+/**
+ * Entity URI callback used in ajaxchat_entity_info_alter().
+ */
+function ajaxchat_uri($channel) {
+  return array(
+    'path' => 'chat/' . $channel->tid,
+  );
+}
+
+/**
+ * Implements hook_permission().
+ */
+function ajaxchat_permission() {
+  $perms = array(
+    'administer chat' => array(
+      'title' => t('Administer chat'),
+    ),
+  );
+  return $perms;
+}
+
+/**
+ * Implements hook_taxonomy_term_delete().
+ */
+function ajaxchat_taxonomy_term_delete($term) {
+  // For containers, remove the tid from the ajaxchat_containers variable.
+  $containers = variable_get('ajaxchat_containers', array());
+  $key = array_search($term->tid, $containers);
+  if ($key !== FALSE) {
+    unset($containers[$key]);
+  }
+  variable_set('ajaxchat_containers', $containers);
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for taxonomy_form_vocabulary().
+ */
+function ajaxchat_form_taxonomy_form_vocabulary_alter(&$form, &$form_state, $form_id) {
+  $vid = variable_get('ajaxchat_vocabulary', 0);
+  if (isset($form['vid']['#value']) && $form['vid']['#value'] == $vid) {
+    $form['help_ajaxchat_vocab'] = array(
+      '#markup' => t('This is the designated chat vocabulary. Some of the normal vocabulary options have been removed.'),
+      '#weight' => -1,
+    );
+    // Chat's vocabulary always has single hierarchy. Channels and containers
+    // have only one parent or no parent for root items. By default this value
+    // is 0.
+    $form['hierarchy']['#value'] = 1;
+    // Do not allow to delete chat's vocabulary.
+    $form['actions']['delete']['#access'] = FALSE;
+  }
+}
+
+/**
+ * Implements hook_form_FORM_ID_alter() for taxonomy_form_term().
+ */
+function ajaxchat_form_taxonomy_form_term_alter(&$form, &$form_state, $form_id) {
+   $vid = variable_get('ajaxchat_vocabulary', 0);
+   if (isset($form['vid']['#value']) && $form['vid']['#value'] == $vid) {
+    // Hide multiple parents select from chat terms.
+    $form['relations']['parent']['#access'] = FALSE;
+  }
+}
+
+/**
+ * Returns a tree of all channels for a given taxonomy term ID.
+ *
+ * @param $tid
+ *   (optional) Taxonomy term ID of the channel. If not given all channel will be
+ *   returned.
+ *
+ * @return
+ *   A tree of taxonomy objects, with the following additional properties:
+ *   - channels: An array of child channels.
+ */
+function ajaxchat_chat_load($tid = NULL) {
+  $cache = &drupal_static(__FUNCTION__, array());
+
+  // Return a cached channel tree if available.
+  if (!isset($tid)) {
+    $tid = 0;
+  }
+  if (isset($cache[$tid])) {
+    return $cache[$tid];
+  }
+
+  $vid = variable_get('ajaxchat_vocabulary', 0);
+
+  // Load and validate the parent term.
+  if ($tid) {
+    $term = taxonomy_term_load($tid);
+    if (!$term || ($term->vid != $vid)) {
+      return $cache[$tid] = FALSE;
+    }
+  }
+  // If $tid is 0, create an empty object to hold the child terms.
+  elseif ($tid === 0) {
+    $term = (object) array(
+      'tid' => 0,
+    );
+  }
+
+  // Determine if the requested term is a container.
+  if (!$term->tid || in_array($term->tid, variable_get('ajaxchat_containers', array()))) {
+    $term->container = 1;
+  }
+
+  // Load parent terms.
+  $term->parents = taxonomy_get_parents_all($term->tid);
+
+  // Load the tree below.
+  $channels = array();
+  $_channels = taxonomy_get_tree($vid, $tid);
+
+  foreach ($_channels as $channel) {
+    // Determine if the child term is a container.
+    if (in_array($channel->tid, variable_get('ajaxchat_containers', array()))) {
+      $channel->container = 1;
+    }
+    $channels[$channel->tid] = $channel;
+  }
+
+  // Cache the result, and return the tree.
+  $term->channels = $channels;
+  $cache[$tid] = $term;
+
+  return $term;
+}
+
+/**
+ * Preprocesses variables for ajaxchat.tpl.php.
+ *
+ * @param $variables
+ *   An array containing the following elements:
+ *   - channels: An array of all channel objects to display for the given taxonomy
+ *     term ID. If tid = 0 then all the top-level channels are displayed.
+ *   - parents: An array of taxonomy term objects that are ancestors of the
+ *     current term ID.
+ *   - tid: Taxonomy term ID of the current channel.
+ *
+ * @see ajaxchat.tpl.php
+ */
+function template_preprocess_ajaxchat(&$variables) {
+  global $user;
+
+  $vid = variable_get('ajaxchat_vocabulary', 0);
+  $vocabulary = taxonomy_vocabulary_load($vid);
+  $title = !empty($vocabulary->name) ? $vocabulary->name : '';
+
+  // Breadcrumb navigation:
+  $breadcrumb[] = l(t('Home'), NULL);
+  if ($variables['tid']) {
+    $breadcrumb[] = l($vocabulary->name, 'chat');
+  }
+  drupal_set_breadcrumb($breadcrumb);
+  drupal_set_title($title);
+
+  if ($variables['channels_defined'] = count($variables['channels']) || count($variables['parents'])) {
+    if (!empty($variables['channels'])) {
+      $variables['channels'] = theme('ajaxchat_channel_list', $variables);
+    }
+    else {
+      $variables['channels'] = '';
+    }
+
+    // Provide separate template suggestions based on what's being output. Topic id is also accounted for.
+    // Check both variables to be safe then the inverse. Forums with topic ID's take precedence.
+    if ($variables['channels']) {
+      $variables['theme_hook_suggestions'][] = 'channels__containers';
+      $variables['theme_hook_suggestions'][] = 'channels__' . $variables['tid'];
+      $variables['theme_hook_suggestions'][] = 'channels__containers__' . $variables['tid'];
+    }
+    else {
+      $variables['theme_hook_suggestions'][] = 'channels__' . $variables['tid'];
+    }
+  }
+  else {
+    drupal_set_title(t('No chat channels defined'));
+    $variables['channels'] = '';
+  }
+}
+
+/**
+ * Preprocesses variables for ajaxchat-channel-list.tpl.php.
+ *
+ * @param $variables
+ *   An array containing the following elements:
+ *   - channels: An array of all channel objects to display for the given taxonomy
+ *     term ID. If tid = 0 then all the top-level channels are displayed.
+ *   - parents: An array of taxonomy term objects that are ancestors of the
+ *     current term ID.
+ *   - tid: Taxonomy term ID of the current channel.
+ *
+ * @see ajaxchat-channel-list.tpl.php
+ * @see theme_ajaxchat_channel_list()
+ */
+function template_preprocess_ajaxchat_channel_list(&$variables) {
+  global $user;
+  $row = 0;
+  // Sanitize each channel so that the template can safely print the data.
+  foreach ($variables['channels'] as $id => $channel) {
+    $variables['channels'][$id]->description = !empty($channel->description) ? filter_xss_admin($channel->description) : '';
+    $variables['channels'][$id]->link = url(variable_get('ajaxchat_install_path', 'chat'), array('query' => array('channelID' => $channel->tid)));
+    $variables['channels'][$id]->name = check_plain($channel->name);
+    $variables['channels'][$id]->is_container = !empty($channel->container);
+    $variables['channels'][$id]->zebra = $row % 2 == 0 ? 'odd' : 'even';
+    $row++;
+  }
+  // Give meaning to $tid for themers. $tid actually stands for term id.
+  $variables['chat_id'] = $variables['tid'];
+  unset($variables['tid']);
+}
+
+/**
+ * Implements hook_ajaxchat_all_channels_alter().
+ * 
+ * @param $customAjaxChat
+ *   The CustomAjaxChat object serving chat requests. 
+ *
+ * @param $allChannels
+ *   All channels available to Ajax Chat.
+ *
+ * @TODO
+ *   Get rid of $customAjaxChat, it is there only to validate
+ *   channel names with trimChannelName.
+ *
+ */
+function ajaxchat_ajaxchat_all_channels_alter(&$customAjaxChat, &$allChannels) {
+
+  // Call the Drupal function to get all the channels (hopefully from cache).
+  $channels = ajaxchat_chat_load();
+
+  foreach ($channels->channels as $channel) {
+    $channelName = $customAjaxChat->trimChannelName($channel->name);
+    $allChannels[$channelName] = $channel->tid;
+  }
+
+}

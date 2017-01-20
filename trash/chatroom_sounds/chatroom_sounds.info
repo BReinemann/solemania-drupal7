@@ -1,0 +1,11 @@
+name = Chat Room Sounds
+description = Adds sound notification on messages.
+package = Chat
+core = 7.x
+dependencies[] = chatroom
+; Information added by drupal.org packaging script on 2012-08-16
+version = "7.x-1.x-dev"
+core = "7.x"
+project = "chatroom_sounds"
+datestamp = "1345118885"
+

@@ -1,0 +1,20 @@
+/**
+ * @file
+ * Styling for the AJAX chat module.
+ */
+
+#chat .description {
+  font-size: 0.9em;
+  margin: 0.5em;
+}
+#chat td.participants,
+#chat td.posts,
+#chat td.topics,
+#chat td.last-reply,
+#chat td.replies,
+#chat td.pager {
+  white-space: nowrap;
+}
+#chat div.indent {
+  margin-left: 20px; /* LTR */
+}

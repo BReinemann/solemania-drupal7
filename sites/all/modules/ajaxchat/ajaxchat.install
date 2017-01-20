@@ -1,0 +1,168 @@
+<?php
+
+/**
+ * @file
+ * Install, update, and uninstall functions for the AJAX chat module.
+ */
+
+/**
+ * Implements hook_install().
+ */
+function ajaxchat_install() {
+  // Set the weight of the ajaxchat.module to 1 so it is loaded after the taxonomy.module.
+  db_update('system')
+    ->fields(array('weight' => 1))
+    ->condition('name', 'ajaxchat')
+    ->execute();
+}
+
+/**
+ * Implements hook_enable().
+ */
+function ajaxchat_enable() {
+  // Create the ajaxchat vocabulary if it does not exist.
+  $vocabulary = taxonomy_vocabulary_load(variable_get('ajaxchat_vocabulary', 0));
+  if (!$vocabulary) {
+    $edit = array(
+      'name' => t('Chat channels'),
+      'machine_name' => 'chat_channels',
+      'description' => t('Chat channels vocabulary'),
+      'hierarchy' => 1,
+      'module' => 'ajaxchat',
+      'weight' => -10,
+    );
+    $vocabulary = (object) $edit;
+    taxonomy_vocabulary_save($vocabulary);
+    variable_set('ajaxchat_vocabulary', $vocabulary->vid);
+  }
+}
+
+/**
+ * Implements hook_uninstall().
+ */
+function ajaxchat_uninstall() {
+  // Load the dependent Taxonomy module, in case it has been disabled.
+  drupal_load('module', 'taxonomy');
+
+  // Remove the taxonomies.
+  $vocabulary = taxonomy_vocabulary_load(variable_get('ajaxchat_vocabulary', 0));
+  if ($vocabulary) {
+    taxonomy_vocabulary_delete(variable_get('ajaxchat_vocabulary', 0));
+  }
+
+  variable_del('ajaxchat_vocabulary');
+  variable_del('ajaxchat_channels');
+  variable_del('chat_channel_order');
+}
+
+/**
+ * Implements hook_schema().
+ */
+function ajaxchat_schema() {
+  $schema = array();
+  $schema['ajax_chat_bans'] = array(
+    'fields' => array(
+      'userID' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'userName' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'not null' => TRUE,
+      ),
+      'dateTime' => array(
+        'mysql_type' => 'datetime',
+        'not null' => TRUE,
+      ),
+      'ip' => array(
+        'mysql_type' => 'varbinary(16)',
+        'not null' => TRUE,
+      ),
+    ),
+  );
+  $schema['ajax_chat_invitations'] = array(
+    'fields' => array(
+      'userID' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'channel' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'dateTime' => array(
+        'mysql_type' => 'datetime',
+        'not null' => TRUE,
+      ),
+    ),
+  );
+  $schema['ajax_chat_messages'] = array(
+    'fields' => array(
+      'id' => array(
+        'type' => 'serial',
+        'not null' => TRUE,
+      ),
+      'userID' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'userName' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'not null' => TRUE,
+      ),
+      'userRole' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'channel' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'dateTime' => array(
+        'mysql_type' => 'datetime',
+        'not null' => TRUE,
+      ),
+      'ip' => array(
+        'mysql_type' => 'varbinary(16)',
+        'not null' => TRUE,
+      ),
+      'text' => array(
+        'type' => 'text',
+        'not null' => FALSE,
+      ),
+    ),
+    'primary key' => array('id'),
+  );
+  $schema['ajax_chat_online'] = array(
+    'fields' => array(
+      'userID' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'userName' => array(
+        'type' => 'varchar',
+        'length' => '64',
+        'not null' => TRUE,
+      ),
+      'userRole' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'channel' => array(
+        'type' => 'int',
+        'not null' => TRUE,
+      ),
+      'dateTime' => array(
+        'mysql_type' => 'datetime',
+        'not null' => TRUE,
+      ),
+      'ip' => array(
+        'mysql_type' => 'varbinary(16)',
+        'not null' => TRUE,
+      ),
+    ),
+  );
+  return $schema;
+}

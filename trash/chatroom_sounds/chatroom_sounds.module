@@ -1,0 +1,173 @@
+<?php
+
+function chatroom_sounds_form_chatroom_irc_buttons_form_alter(&$form, $form_state) {
+  drupal_add_js(drupal_get_path('module', 'chatroom_sounds') . '/chatroom_sounds.js', 'file');
+  
+  $result = chatroom_sounds_load_initial_field(str_replace('chatroom_irc_buttons_form_', '', $form['#form_id']));
+  $field_key = str_replace('_cid', '', $result['chatroom_sounds_field_key']);  
+  
+  $ogg = chatroom_sounds_get_sound_url($field_key, 'ogg');
+  $mp3 = chatroom_sounds_get_sound_url($field_key, 'mp3');
+  $output = '<audio id="notification_sound" style="dispaly:none" preload="auto">
+		<source src="' . $ogg . '" type="audio/ogg" />
+		<source src="' . $mp3 . '" type="audio/mp3" />                
+              </audio>';
+  $output .= '<span id="chatroom-sound-on-off">
+                <input id="chatroom-sound-on-off-button" value="Turn Sound Off" type="submit" class="form-submit">
+              </span>';
+  $form['sounds'] = array(
+      '#markup' => $output,
+  );
+  global $user;
+  drupal_add_js(array('chatroom' => array('sound' => TRUE, 'uid' => $user->uid)), 'setting');
+}
+
+function chatroom_sounds_nodejs_content_channel_message_alter(&$message) {
+  // check for propper callback
+  if (is_string($message->callback)) {
+    if ($message->callback == 'chatroomMessageHandler')
+      $message->callback = array($message->callback, 'chatroomSoundsPlaySound' );        
+  }
+  else{
+    if (in_array('chatroomMessageHandler', $message->callback))
+      $message->callback[] = 'chatroomSoundsPlaySound';    
+  }
+}
+
+/*
+ * hook_menu implemenataion 
+ */
+function chatroom_sounds_menu() {
+  $items = array();
+  $items['admin/config/chatroom_sounds'] = array(
+      'title' => 'Chatroom Sounds',
+      'description' => 'Chatroom Sounds Settings',
+      'weight' => -100,
+      'page callback' => 'system_admin_menu_block_page',
+      'access arguments' => array('administer site configuration'),
+      'file' => 'system.admin.inc',
+      'file path' => drupal_get_path('module', 'system'),
+  );
+  $items['admin/config/chatroom_sounds/sounds'] = array(
+      'title' => 'Chatroom Sounds',
+      'description' => 'Setup custom sounds for chatroom',
+      'page callback' => 'chatroom_sounds_page',
+      'access arguments' => array('administer site configuration'),
+  );
+  return $items;
+}
+
+function chatroom_sounds_page() {
+  return drupal_get_form('chatroom_sounds_custom_sound_form');
+}
+
+function chatroom_sounds_custom_sound_form() {
+
+  $field_types = field_info_field_by_ids();
+  foreach ($field_types as $key => $field_info) {
+    if ($field_info['type'] == 'chatroom') {
+      $form['sounds']['chatroom_sounds_' . $field_info["field_name"]]['mp3_' . $field_info["field_name"]] = array(
+          '#type' => 'file',
+          '#title' => 'Custom mp3 sound for ' . $field_info["field_name"],
+      );
+      $form['sounds']['chatroom_sounds_' . $field_info["field_name"]]['ogg_' . $field_info["field_name"]] = array(
+          '#type' => 'file',
+          '#title' => 'Custom ogg sound for ' . $field_info["field_name"],
+      );
+    }
+  }
+  $form['submit'] = array(
+      '#type' => 'submit',
+      '#value' => t('Save'),
+      '#submit' => array('chatroom_sounds_main_submit'),
+      '#validate' => array('chatroom_sounds_main_validate'),
+  );
+  return $form;
+}
+
+function chatroom_sounds_main_validate($form, &$form_state) {
+  foreach ($form['sounds'] as $key => $value) {
+    if (strpos($key, 'chatroom_sounds_field_') === 0) {
+      $field_key = str_replace('chatroom_sounds_', '', $key);
+
+      $mp3 = file_save_upload('mp3_' . $field_key, array(
+          'file_validate_extensions' => array('mp3'), // Validate extensions.
+              ));
+      $ogg = file_save_upload('ogg_' . $field_key, array(
+          'file_validate_extensions' => array('ogg'), // Validate extensions.
+              ));
+      if (empty($mp3) && !empty($ogg)) {
+        form_set_error('ogg_' . $field_key, t('No file was uploaded.'));
+        continue;
+      }
+      if (!empty($mp3) && empty($ogg)) {
+        form_set_error('mp3_' . $field_key, t('No file was uploaded.'));
+        continue;
+      }      
+      if (empty($mp3) && empty($ogg)) {
+        variable_del('chatroom_sounds_mp3_' . $field_key);
+        variable_del('chatroom_sounds_ogg_' . $field_key);
+        continue;
+      }
+
+      $dir = 'public://chatroom_sounds';
+      file_prepare_directory($dir, FILE_CREATE_DIRECTORY);
+
+      if ($mp3 = file_move($mp3, 'public://chatroom_sounds/' . $mp3->filename)) {        
+        $form_state['storage']['chatroom_sounds_mp3_' . $field_key] = $mp3;
+      } 
+      else {
+        form_set_error('ogg_' . $field_key, t('Failed to write the uploaded file the site\'s file folder.'));
+      }
+
+      if ($ogg = file_move($ogg, 'public://chatroom_sounds/' . $ogg->filename)) {        
+        $form_state['storage']['chatroom_sounds_ogg_' . $field_key] = $ogg;
+      } 
+      else {
+        form_set_error('mp3_' . $field_key, t('Failed to write the uploaded file the site\'s file folder.'));
+      }
+    }
+  }
+}
+
+function chatroom_sounds_main_submit($form, &$form_state) {
+  foreach ($form_state['storage'] as $file_key => $file) {
+    // We are done with the file, remove it from storage.
+    unset($form_state['storage']['file']);
+    // Make the storage of the file permanent
+    $file->status = FILE_STATUS_PERMANENT;
+    // Save file status.
+    file_save($file);
+    variable_set($file_key, $file->fid);
+  }
+}
+
+function chatroom_sounds_load_initial_field($cid) {
+  $fields = field_info_field_by_ids();
+  foreach ($fields as $field_key => $field) {
+    if ($field["type"] == 'chatroom') {
+      $query = db_query("SELECT * FROM {field_data_" . $field['field_name'] . "} f
+        WHERE " . $field['field_name'] . "_cid = :cid", 
+              array(
+                  ':cid' => $cid,
+                  )
+              );
+      if ($result = $query->fetchAssoc()) {
+        $result['chatroom_sounds_field_key'] = $field['field_name'] . "_cid";
+        return $result;
+        }
+    }
+  }
+  return NULL;
+}
+
+function chatroom_sounds_get_sound_url($field_key, $mime) {
+  $fid = variable_get("chatroom_sounds_" . $mime . "_" . $field_key, FALSE);
+  if (!$fid) 
+    $url = file_create_url(drupal_get_path('module', 'chatroom_sounds') . '/sounds/notify.ogg');
+  else {
+    $file = file_load($fid);
+    $url = file_create_url($file->uri);
+  }
+  return $url;
+}

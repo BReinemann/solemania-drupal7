@@ -1,0 +1,15 @@
+name = AJAX chat
+description = Integrates the AJAX chat system with Drupal.
+dependencies[] = taxonomy
+package = AJAX chat
+version = VERSION
+core = 7.x
+configure = admin/config/chat
+stylesheets[all][] = ajaxchat.css
+
+; Information added by drupal.org packaging script on 2013-09-30
+version = "7.x-1.0+8-dev"
+core = "7.x"
+project = "ajaxchat"
+datestamp = "1380564587"
+

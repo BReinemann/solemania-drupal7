@@ -1,0 +1,3 @@
+h1. Chatroom Sounds
+
+* This module provides an extension to "Drupal Chatroom Module (version 7.x-2.x)":http://drupal.org/project/chatroom, which depends on "Drupal's Node.js Integration module":http://drupal.org/project/nodejs. 
